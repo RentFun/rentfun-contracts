@@ -1,5 +1,4 @@
-# rentfun-contracts
-rentfun-contracts
+# RentFun-contracts
 
 Usage
 -----

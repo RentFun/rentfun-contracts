@@ -1,6 +1,6 @@
 pragma solidity ^0.8.4;
 
-import {ERC721} from "solmate/tokens/ERC721.sol";
+import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ERC721VaultInterface} from "./interfaces/ERC721VaultInterface.sol";
 
 contract ERC721Vault is ERC721VaultInterface {

@@ -3,9 +3,9 @@ pragma solidity ^0.8.4;
 
 import {ERC721VaultInterface} from "./interfaces/ERC721VaultInterface.sol";
 
-import {ERC721} from "solmate/tokens/ERC721.sol";
-import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
-import {EnumerableSet} from "openzeppelin-contracts/contracts/utils/structs/EnumerableSet.sol";
+import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 contract AccessDelegate is Ownable {
     using SafeMath for uint256;
@@ -80,11 +80,12 @@ contract AccessDelegate is Ownable {
     mapping(uint256 => uint256) internal rentIdxes;
 
     /// @notice A mapping pointing rentId to its rent
+    /// dev rentIdx -> rent
     mapping(uint256 => Rent) internal rents;
 
-    /// @notice A double mapping from rentIdx to contract to renter
+    /// @notice A double mapping from rentIdx to contract to renter to keep the most lasting rent
     /// @dev renter -> contract -> rentIdx
-    mapping(address => mapping(address => uint256)) internal rentsByRenterAndContract;
+    mapping(address => mapping(address => uint256)) internal lastingRents;
 
     /// @notice Emitted on each token lent
     event TokenLent(address indexed depositer, address indexed contract_, uint256 tokenId,
@@ -180,7 +181,17 @@ contract AccessDelegate is Ownable {
         });
         rentIdxes[tokenIdx] = ++rentIdx;
         rents[rentIdx] = rent;
-        rentsByRenterAndContract[msg.sender][detail.token.contract_] = rentIdx;
+
+        // update the most lasting rent
+        uint256 lastRentIdx = lastingRents[msg.sender][detail.token.contract_];
+        if (lastRentIdx == 0) {
+            lastingRents[msg.sender][detail.token.contract_] = rentIdx;
+        } else {
+            Rent lastRent = rents[lastRentIdx];
+            if (rent.endTime >= lastRent.endTime) {
+                lastingRents[msg.sender][detail.token.contract_] = rentIdx;
+            }
+        }
 
         emit TokenRented(msg.sender, tokenIdx, rentIdx);
     }
@@ -216,6 +227,17 @@ contract AccessDelegate is Ownable {
         tokenDetails[tokenIdx] = detail;
 
         emit LentCancelled(msg.sender, detail.token.contract_, detail.token.tokenId);
+    }
+
+    /// @notice check if a given address is renting a token for a given NFT contract.
+    function checkRent(address renter, address contract_) external view returns (uint256 tokenId, uint256 endTime) {
+        uint256 rentIdx = lastingRents[renter][contract_];
+        if (rentIdx == 0) {
+            return (0, 0);
+        }
+
+        Rent rent = rents[rentIdx];
+        return (rent.token.tokenId, rent.endTime);
     }
 
     /// @notice contractSet setter
