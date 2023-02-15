@@ -1,0 +1,7 @@
+.idea/
+artifacts/
+build/
+node_modules/
+cache/
+.env
+deployments/
