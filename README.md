@@ -1,5 +1,5 @@
-# rtoken-contracts
-StaFi rtoken contracts
+# rentfun-contracts
+rentfun-contracts
 
 Usage
 -----
