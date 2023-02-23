@@ -6,6 +6,7 @@ import { time } from "@nomicfoundation/hardhat-network-helpers";
 
 describe("AccessDelegate", () => {
     let NFToken: Contract;
+    let RentToken: Contract;
     let alice: Signer;
     let bob: Signer;
     let carol: Signer;
@@ -16,6 +17,7 @@ describe("AccessDelegate", () => {
     let devAddr: string;
     let AccessDelegate: Contract;
     let NFTokenAddress: string;
+    let RentTokenAddress: string;
     let AccessDelegateAddress: string;
     const Hour = 60 * 60;
     let OwnerVaultFactory: ContractFactory;
@@ -31,19 +33,27 @@ describe("AccessDelegate", () => {
         console.log("bobAddr", bobAddr);
         console.log("carolAddr", carolAddr);
         console.log("devAddr", devAddr);
-        const NFTokenFactory = await ethers.getContractFactory("NFToken");
 
+        const NFTokenFactory = await ethers.getContractFactory("NFToken");
         NFToken = await NFTokenFactory.deploy();
         await NFToken.deployed();
         NFTokenAddress = NFToken.address;
         console.log("NFToken", NFTokenAddress);
-        const AccessDelegateFactory = await ethers.getContractFactory("AccessDelegate");
 
+        const RentTokenFactory = await ethers.getContractFactory("RentToken");
+        RentToken = await RentTokenFactory.deploy(parseEther("10000"));
+        await RentToken.deployed();
+        RentTokenAddress = RentToken.address;
+        console.log("RentToken", RentTokenAddress);
+        expect(await RentToken.transfer(carolAddr, parseEther("10"))).to.be.ok;
+        const carolRent = await RentToken.balanceOf(carolAddr);
+        expect(carolRent).to.equal(parseEther("10"));
+
+        const AccessDelegateFactory = await ethers.getContractFactory("AccessDelegate");
         AccessDelegate = await AccessDelegateFactory.deploy(aliceAddr, Hour, 1000);
         await AccessDelegate.deployed();
         AccessDelegateAddress = AccessDelegate.address;
         console.log("AccessDelegate", AccessDelegateAddress);
-
         OwnerVaultFactory = await ethers.getContractFactory("OwnerVault");
 
         expect(await AccessDelegate.setPartners(NFTokenAddress, aliceAddr, 5000)).to.be.ok;
@@ -210,6 +220,41 @@ describe("AccessDelegate", () => {
             const before = carolBalanceBeforeRent.div(parseEther("1"));
             const after = carolBalanceAfterRent.div(parseEther("1"));
             expect(before.sub(after)).to.equal(3);
+        });
+    });
+
+    describe("ERC20 token as payment mode", () => {
+        it("should reverted with Payment contract is not supported trying to delegate an NFToken", async () => {
+            await NFToken.mintCollectionNFT(aliceAddr, 1);
+            expect(await NFToken.approve(AccessDelegateAddress, 1)).to.be.ok;
+            await expect(AccessDelegate.delegateNFToken(NFTokenAddress, 1, RentTokenAddress, parseEther("1"))).to.be.revertedWith(
+                "Payment contract is not supported"
+            );
+        });
+
+        it("should be ok to take ERC20 token as payment", async () => {
+            expect(await AccessDelegate.addPayment(RentTokenAddress)).to.be.ok;
+            await NFToken.mintCollectionNFT(bobAddr, 2);
+            expect(await NFToken.connect(bob).approve(AccessDelegateAddress, 2)).to.be.ok;
+            await expect(AccessDelegate.connect(bob).delegateNFToken(NFTokenAddress, 2, RentTokenAddress, parseEther("1"))).to.be.ok;
+
+            expect(await RentToken.connect(carol).approve(AccessDelegateAddress, parseEther("10000"))).to.be.ok;
+            let nextTokenIdx = await AccessDelegate.nextTokenIdx();
+            expect(nextTokenIdx).to.equal(2);
+            const td1 = await AccessDelegate.tokenDetails(1);
+            expect(td1.payment).to.be.equal(RentTokenAddress);
+
+            const rentTx = await AccessDelegate.connect(carol).rentNFToken(1, 3);
+            expect(rentTx).to.be.ok;
+
+            const carolRent = await RentToken.balanceOf(carolAddr);
+            expect(carolRent).to.equal(parseEther("7"));
+
+            const bobRent = await RentToken.balanceOf(bobAddr);
+            expect(bobRent).to.equal(parseEther("2.7"));
+
+            const aliceRent = await RentToken.balanceOf(aliceAddr);
+            expect(aliceRent).to.equal(parseEther("9990.15"));
         });
     });
 })

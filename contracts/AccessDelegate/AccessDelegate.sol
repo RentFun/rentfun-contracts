@@ -160,6 +160,8 @@ contract AccessDelegate is Ownable {
             detail.unitFee = unitFee;
             detail.rentStatus = RentStatus.RENTABLE;
         }
+
+//        console.log("detail.payment", detail.payment);
         tokenDetails[tokenIdx] = detail;
         tokenContracts.add(contract_);
         tokenIndexesByContract[contract_].add(tokenIdx);
@@ -184,9 +186,9 @@ contract AccessDelegate is Ownable {
         Partner memory ptn = partners[detail.contract_];
         uint256 partnerFee = platformFee.mul(ptn.commission).div(feeBase);
         platformFee = platformFee.sub(partnerFee);
-        _pay(detail.payment, detail.depositor, rentFee);
-        _pay(detail.payment, ptn.feeReceiver, partnerFee);
-        _pay(detail.payment, adVault, platformFee);
+        _pay(detail.payment, msg.sender, detail.depositor, rentFee);
+        _pay(detail.payment, msg.sender, ptn.feeReceiver, partnerFee);
+        _pay(detail.payment, msg.sender, adVault, platformFee);
         // update total fee
         ptn.totalFee = ptn.totalFee.add(partnerFee);
         partners[detail.contract_] = ptn;
@@ -312,9 +314,19 @@ contract AccessDelegate is Ownable {
         adVault = adVault_;
     }
 
+    /// @notice add payment
+    function addPayment(address payment) external onlyOwner {
+        paymentContracts.add(payment);
+    }
+
     /// @notice owners getter
     function getOwners() public view returns (address[] memory) {
         return owners.values();
+    }
+
+    /// @notice getPaymentContracts getter
+    function getPaymentContracts() public view returns (address[] memory) {
+        return paymentContracts.values();
     }
 
     /// @notice partnerContracts getter
@@ -327,21 +339,21 @@ contract AccessDelegate is Ownable {
         return tokenContracts.values();
     }
 
+    /// @notice pay ether or ERC20
+    function _pay(address payment, address from, address to, uint256 amount) private {
+        if (amount == 0) return;
+        if (payment == address(0)) {
+            _payEther(payable(to), amount);
+        } else {
+            ERC20(payment).safeTransferFrom(from, to, amount);
+        }
+    }
+
     /// @notice pay ether
     function _payEther(address payable recipient, uint256 amount) private {
         if (amount == 0) return;
         (bool sent,) = recipient.call{value: amount}("");
         require(sent, "SEND_ETHER_FAILED");
-    }
-
-    /// @notice pay ether or ERC20
-    function _pay(address payment, address recipient, uint256 amount) private {
-        if (amount == 0) return;
-        if (payment == address(0)) {
-            _payEther(payable(recipient), amount);
-        } else {
-            ERC20(payment).safeTransfer(recipient, amount);
-        }
     }
 
     /// @dev Helper function to compute hash for a given token
