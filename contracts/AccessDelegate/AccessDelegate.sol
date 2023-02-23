@@ -1,42 +1,57 @@
-// SPDX-License-Identifier: CC0-1.0
+// SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.4;
 
-import {ERC721VaultInterface} from "./interfaces/ERC721VaultInterface.sol";
+import {OwnerVault} from "./OwnerVault.sol";
 
+import {SafeMath} from "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
+import "hardhat/console.sol";
+
 contract AccessDelegate is Ownable {
     using SafeMath for uint256;
+    using SafeERC20 for ERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
+    using EnumerableSet for EnumerableSet.UintSet;
 
+    /// Minimum rental time
     uint256 public unitTime;
     uint256 public commission;
     uint256 public constant feeBase = 10000;
-    address public feeReceiver;
-    address public vault;
+    address public adVault;
 
-    struct NFToken {
-        address contract_;
-        uint256 tokenId;
-    }
+    EnumerableSet.AddressSet internal owners;
+    /// @notice A mapping pointing owner address to its asset contract.
+    mapping(address => address) public vaults;
 
-    /// @notice Delegation type
-    enum TokenStatus {
+    /// @notice rent status
+    /// @dev RENTED can still be RENTABLE if the endTime is expired
+    /// @dev UNRENTABLE means no more rental but can still be rented as the last rental may not expire.
+    enum RentStatus {
         NONE,
         RENTABLE,
-        UNRENTABLE,
-        WITHDRAWN
+        RENTED,
+        UNRENTABLE
     }
+
     struct TokenDetail {
+        address contract_;
+        uint256 tokenId;
         address depositor;
-        NFToken token;
+        address vault;
+        address payment;
         uint256 unitFee;
-        uint256 totalRentCount;
+        // The total number of times this token is rented
+        uint256 totalCount;
         uint256 totalFee;
-        uint256 totalTime;
-        TokenStatus status;
+        uint256 totalAmount;
+        uint256 lastRentIdx;
+        uint256 endTime;
+        RentStatus rentStatus;
     }
 
     struct Partner {
@@ -45,245 +60,292 @@ contract AccessDelegate is Ownable {
         uint256 totalFee;
     }
 
-    EnumerableSet.AddressSet public contractSet;
-    /// @notice A mapping pointing token's contract address to partner structs
+    /// @notice All Partners' contracts
+    EnumerableSet.AddressSet internal paymentContracts;
+    /// @notice A mapping pointing partner's contract address to its total fee
+    mapping(address => uint256) public payments;
+
+    /// @notice All Partners' contracts
+    EnumerableSet.AddressSet internal partnerContracts;
+    /// @notice A mapping pointing partner's contract address to partner structs
     mapping(address => Partner) public partners;
 
-    constructor(address feeReceiver_, uint256 unitTime_, uint256 commission_) {
-        // The commission cannot exceed 10%
-        require(commission_ <= 1000, "commission too big");
-        feeReceiver = feeReceiver_;
-        unitTime = unitTime_;
-        commission = commission_;
-    }
-
-    /// @notice An incrementing counter to create unique ids for each escrow deposit created
+    /// @notice An incrementing counter to create unique ids for each token
     uint256 public nextTokenIdx = 1;
 
     /// @notice A mapping pointing tokenId to TokenDetail structs
     mapping(uint256 => TokenDetail) public tokenDetails;
 
     /// @notice A mapping pointing token hash to tokenId
-    mapping(byte32 => uint256) public tokenIdxes;
+    mapping(bytes32 => uint256) public tokenIdxes;
 
-    struct Rent {
+    /// @notice All Tokens' contracts
+    EnumerableSet.AddressSet internal tokenContracts;
+    /// @notice A mapping pointing token's contract address to related token indexes
+    mapping(address => EnumerableSet.UintSet) internal tokenIndexesByContract;
+
+    struct Rental {
         address renter;
-        NFToken token;
-        uint256 amount;
-        uint256 unitTime;
-        uint256 unitFee;
-        uint256 rentFee;
+        address contract_;
+        uint256 tokenId;
+        address vault;
         uint256 endTime;
     }
 
-    /// @notice A mapping pointing tokenIdx to its rentIdx
-    mapping(uint256 => uint256) internal rentIdxes;
+    /// @notice An incrementing counter to create unique idx for each rental
+    uint256 public totalRentCount = 0;
 
-    /// @notice A mapping pointing rentId to its rent
-    /// dev rentIdx -> rent
-    mapping(uint256 => Rent) internal rents;
+    /// @notice A mapping pointing rentIdx to the rental
+    /// dev rentIdx -> rental
+    mapping(uint256 => Rental) public rentals;
 
-    /// @notice A double mapping from rentIdx to contract to renter to keep the most lasting rent
-    /// @dev renter -> contract -> rentIdx
-    mapping(address => mapping(address => uint256)) internal lastingRents;
+    /// @notice A double mappings pointing renter to contract to rentIdxes
+    /// dev renter -> contract -> rentIdxes
+    mapping(address => mapping(address => EnumerableSet.UintSet)) internal personalRentals;
 
     /// @notice Emitted on each token lent
-    event TokenLent(address indexed depositer, address indexed contract_, uint256 tokenId,
-        uint256 endTime, uint256 unitFee);
+    event TokenDelegated(address indexed depositer, address indexed contract_, uint256 tokenId, uint256 unitFee);
 
-    /// @notice Emitted on each token rent
-    event TokenRented(address indexed renter, uint256 tokenIdx, uint256 rentIdx);
-
-    /// @notice Emitted on each token withdraw
-    event TokenWithdrawn(address indexed depositor, address indexed contract_, uint256 tokenId);
+    /// @notice Emitted on each token rental
+    event TokenRented(address indexed renter, uint256 tokenIdx, uint256 rentIdx, address indexed contract_, uint256 tokenId);
 
     /// @notice Emitted on each token lent cancel
-    event LentCancelled(address indexed depositor, address indexed contract_, uint256 tokenId);
+    event TokenUndelegated(address indexed depositor, uint256 tokenIdx, address indexed contract_, uint256 tokenId);
 
-    /**
-     * ----------- DEPOSIT CREATION AND BURN -----------
-     */
-
-    /// @notice Use this to deposit a timelocked escrow and create a liquid claim on its delegation rights
-    /// @param contract_ The collection contract to deposit from
-    /// @param tokenId The tokenId from the collection to deposit
-    /// @param expiration The timestamp that the liquid delegate will expire and return the escrowed NFT
-    /// @param referrer Set to the zero address by default, alternate frontends can populate this to receive half the creation fee
-    function lendToken(address contract_, uint256 tokenId, uint256 unitFee) external {
-        ERC721(contract_).transferFrom(msg.sender, vault, tokenId);
-        bytes32 tokenHash = _tokenHash(contract_, tokenId);
-        uint256 idx = tokenIdxes[tokenHash];
-        TokenDetail detail;
-        if (idx == 0) {
-            // The token comes for the first time
-            idx = nextTokenIdx++;
-            detail = TokenDetail({
-                depositor: msg.sender,
-                token: NFToken(contract_, tokenId),
-                unitFee: unitFee,
-                totalRentCount: 0,
-                totalFee: 0,
-                totalTime: 0,
-                TokenStatus: TokenStatus.RENTABLE
-            });
-            tokenIdxes[tokenHash] = idx;
-        } else {
-            // The token has ever been delegated
-            detail = tokenDetails[id];
-            detail.depositor = msg.sender;
-            detail.unitFee = unitFee;
-            detail.status = TokenStatus.RENTABLE;
-        }
-        tokenDetails[idx] = detail;
-        contractSet.add(contract_);
-
-        emit TokenLent(msg.sender, contract_, tokenId, unitFee);
+    constructor(address adVault_, uint256 unitTime_, uint256 commission_) {
+        // The commission cannot exceed 10%
+        require(commission_ <= 1000, "commission too big");
+        adVault = adVault_;
+        unitTime = unitTime_;
+        commission = commission_;
+        paymentContracts.add(address(0));
     }
 
-    function rentToken(uint256 tokenIdx, uint256 amount) external payable {
-        TokenDetail detail = tokenDetails[tokenIdx];
-        require(detail.status == TokenStatus.RENTABLE, "Token is unrentable");
-        require(amount > 0, "Rent period too short");
-        uint256 rentIdx = rentIdxes[tokenIdx];
-        if (rentIdx != 0) {
-            // The token has ever been rented
-            require(rents[rentIdx].endTime <= block.timestamp, "Token is already being rented");
+    /// @notice create a vault owned by msg.sender
+    function createVault() external {
+        require(vaults[msg.sender] == address(0), "You already have a vault");
+        _createVault(msg.sender);
+    }
+
+    /// @notice delegate an NFToken to RentFun
+    /// @param contract_ The NFToken contract that issue the tokens
+    /// @param tokenId The id the NFToken
+    /// @param unitFee The unit rental price
+    function delegateNFToken(address contract_, uint256 tokenId, address payment, uint256 unitFee) external {
+        require(paymentContracts.contains(payment), "Payment contract is not supported");
+
+        if (vaults[msg.sender] == address(0)) {
+            _createVault(msg.sender);
         }
 
-        uint256 totalTime = unitTime.mul(amount);
-        uint256 totalFee = unitFee.mul(amount);
+        address vault = vaults[msg.sender];
+        if (ERC721(contract_).ownerOf(tokenId) != vault) {
+            ERC721(contract_).transferFrom(msg.sender, vault, tokenId);
+        }
+
+        bytes32 tokenHash = getTokenHash(contract_, tokenId);
+        uint256 tokenIdx = tokenIdxes[tokenHash];
+        TokenDetail memory detail;
+        if (tokenIdx == 0) {
+            // The token is delegated for the first time
+            tokenIdx = nextTokenIdx++;
+            detail = TokenDetail(contract_, tokenId, msg.sender, vault, payment, unitFee, 0, 0, 0, 0, 0, RentStatus.RENTABLE);
+            tokenIdxes[tokenHash] = tokenIdx;
+        } else {
+            // The token has ever been delegated, just update its detail
+            detail = tokenDetails[tokenIdx];
+            detail.depositor = msg.sender;
+            detail.vault = vault;
+            detail.payment = payment;
+            detail.unitFee = unitFee;
+            detail.rentStatus = RentStatus.RENTABLE;
+        }
+        tokenDetails[tokenIdx] = detail;
+        tokenContracts.add(contract_);
+        tokenIndexesByContract[contract_].add(tokenIdx);
+
+        emit TokenDelegated(msg.sender, contract_, tokenId, unitFee);
+    }
+
+    /// @notice rent a token only if the token is available
+    /// @param tokenIdx The only index for each NFToken
+    /// @param amount The amount of unitTime and this rental's total time will be unitTime * amount
+    function rentNFToken(uint256 tokenIdx, uint256 amount) external payable {
+        TokenDetail memory detail = tokenDetails[tokenIdx];
+        require(detail.rentStatus == RentStatus.RENTABLE ||
+        (detail.rentStatus == RentStatus.RENTED && detail.endTime < block.timestamp), "Token is not rentable");
+        require(amount > 0, "Rent period too short");
+        require(detail.vault == ERC721(detail.contract_).ownerOf(detail.tokenId), "Token was not owned by its vault");
+        uint256 totalFee = detail.unitFee.mul(amount);
+        if (detail.payment == address(0)) require(msg.value == totalFee, "WRONG_FEE");
+
         uint256 platformFee = totalFee.mul(commission).div(feeBase);
         uint256 rentFee = totalFee.sub(platformFee);
-        _pay(detail.depositor, rentFee, true);
-        Partner ptn = partners[detail.token.contract_];
-        if (ptn.commission != 0) {
-            uint256 partnerFee = platformFee.mul(ptn.commission).div(feeBase);
-            platformFee = platformFee.sub(partnerFee);
-            _pay(feeReceiver, platformFee, true);
-            _pay(ptn.feeReceiver, partnerFee, true);
-            ptn.totalFee = ptn.totalFee.add(partnerFee);
-            partners[detail.token.contract_] = ptn;
-        }
+        Partner memory ptn = partners[detail.contract_];
+        uint256 partnerFee = platformFee.mul(ptn.commission).div(feeBase);
+        platformFee = platformFee.sub(partnerFee);
+        _pay(detail.payment, detail.depositor, rentFee);
+        _pay(detail.payment, ptn.feeReceiver, partnerFee);
+        _pay(detail.payment, adVault, platformFee);
+        // update total fee
+        ptn.totalFee = ptn.totalFee.add(partnerFee);
+        partners[detail.contract_] = ptn;
+        payments[detail.payment] = payments[detail.payment].add(totalFee);
 
-        detail.totalRentCount = detail.totalRentCount.add(1);
-        detail.totalFee = detail.totalFee.add(totalFee);
-        detail.totalTime = detail.totalTime.add(totalTime);
+        // update detail
+        ++detail.totalCount;
+        detail.totalFee = detail.totalFee.add(rentFee);
+        detail.totalAmount = detail.totalAmount.add(amount);
+        detail.lastRentIdx = ++totalRentCount;
+        detail.endTime = block.timestamp.add(unitTime.mul(amount));
+        detail.rentStatus = RentStatus.RENTED;
         tokenDetails[tokenIdx] = detail;
 
-        Rent rent = Rent({
-            renter: msg.sender,
-            token: detail.token,
-            amount: amount,
-            unitFee: detail.unitFee,
-            unitTime: unitTime,
-            rentFee: rentFee,
-            endTime: block.timestamp.add(unitTime.mul(amount))
-        });
-        rentIdxes[tokenIdx] = ++rentIdx;
-        rents[rentIdx] = rent;
+        // update rentals
+        rentals[totalRentCount] = Rental(msg.sender, detail.contract_, detail.tokenId, detail.vault, detail.endTime);
+        personalRentals[msg.sender][detail.contract_].add(totalRentCount);
 
-        // update the most lasting rent
-        uint256 lastRentIdx = lastingRents[msg.sender][detail.token.contract_];
-        if (lastRentIdx == 0) {
-            lastingRents[msg.sender][detail.token.contract_] = rentIdx;
-        } else {
-            Rent lastRent = rents[lastRentIdx];
-            if (rent.endTime >= lastRent.endTime) {
-                lastingRents[msg.sender][detail.token.contract_] = rentIdx;
+        emit TokenRented(msg.sender, tokenIdx, detail.lastRentIdx, detail.contract_, detail.tokenId);
+    }
+
+    /// @notice undelegate an NFToken will just make it unrentable, the exist rents won't be affected.
+    /// @param tokenIdx The idx of the NFToken
+    function undelegateNFToken(uint256 tokenIdx) external {
+        TokenDetail memory detail = tokenDetails[tokenIdx];
+        require(msg.sender == detail.depositor, "Undelegate can only be done by the depositor");
+        require(detail.rentStatus != RentStatus.UNRENTABLE, "Token is already UNRENTABLE");
+
+        detail.rentStatus = RentStatus.UNRENTABLE;
+        tokenDetails[tokenIdx] = detail;
+
+        emit TokenUndelegated(msg.sender, tokenIdx, detail.contract_, detail.tokenId);
+    }
+
+    /// @notice check if a given token is rented or not
+    function isNFTokenRented(address contract_, uint256 tokenId) public view returns (bool) {
+        bytes32 tokenHash = getTokenHash(contract_, tokenId);
+        uint256 tokenIdx = tokenIdxes[tokenHash];
+        if (tokenIdx == 0) return false;
+
+        TokenDetail memory detail = tokenDetails[tokenIdx];
+        /// @dev Undelegate A token that has never been rented will make it UNRENTABLE while
+        /// detail.endTime is still 0
+        return detail.rentStatus != RentStatus.UNRENTABLE || detail.endTime >= block.timestamp;
+    }
+
+    /// @notice check all rentals for a given renter.
+    function getFullRentals(address renter, address contract_) external view returns (Rental[] memory fullRentals) {
+        uint256[] memory rentIdxes = personalRentals[renter][contract_].values();
+        if (rentIdxes.length == 0) return fullRentals;
+        fullRentals = new Rental[](rentIdxes.length);
+        for(uint i = 0; i < rentIdxes.length; i++) {
+            fullRentals[i] = rentals[rentIdxes[i]];
+        }
+    }
+
+    /// @notice check all alive rentals for a given renter.
+    function getAliveRentals(address renter, address contract_) public view returns (Rental[] memory aliveRentals) {
+        uint256[] memory rentIdxes = personalRentals[renter][contract_].values();
+        uint256 count = 0;
+        for(uint i = 0; i < rentIdxes.length; i++) {
+            if (rentals[rentIdxes[i]].endTime >= block.timestamp) count++;
+        }
+        if (count == 0) return aliveRentals;
+        aliveRentals = new Rental[](count);
+        uint j = 0;
+        for(uint i = 0; i < rentIdxes.length; i++) {
+            if (rentals[rentIdxes[i]].endTime >= block.timestamp) aliveRentals[j++] = rentals[rentIdxes[i]];
+        }
+    }
+
+    /// @notice get renting tokens by contract
+    function getRentableTokens(address contract_) public view returns(TokenDetail[] memory details) {
+        uint256[] memory tokenIndexes = tokenIndexesByContract[contract_].values();
+        uint256 count = 0;
+        TokenDetail memory detail;
+        for(uint i = 0; i < tokenIndexes.length; i++) {
+            detail = tokenDetails[tokenIndexes[i]];
+            if (!isNFTokenRented(detail.contract_, detail.tokenId)) {
+                count++;
             }
         }
+        if (count == 0) return details;
 
-        emit TokenRented(msg.sender, tokenIdx, rentIdx);
-    }
-
-    /// @notice withdraw can only be done as there're no rent exist
-    /// @param tokenIdx The idx of the NFToken
-    function withdraw(uint256 tokenIdx) external {
-        TokenDetail detail = tokenDetails[tokenIdx];
-        require(msg.sender == detail.depositor, "Token can only be withdrawed by the depositor");
-        require(detail.status != TokenStatus.WITHDRAWN, "Token has already been withdrawed");
-
-        uint256 rentIdx = rentIdxes[tokenIdx];
-        if (rentIdx != 0) {
-            // The token has ever been rented
-            require(rents[rentIdx].endTime <= block.timestamp, "Token is being rented");
+        details = new TokenDetail[](count);
+        uint j = 0;
+        for(uint i = 0; i < tokenIndexes.length; i++) {
+            detail = tokenDetails[tokenIndexes[i]];
+            if (!isNFTokenRented(detail.contract_, detail.tokenId)) details[j++] = detail;
         }
-
-        ERC721VaultInterface(vault).transferTo(detail.token.contract_, detail.token.tokenId, msg.sender);
-        detail.status = TokenStatus.WITHDRAWN;
-        tokenDetails[tokenIdx] = detail;
-
-        emit TokenWithdrawn(msg.sender, detail.token.contract_, detail.token.tokenId);
     }
 
-    /// @notice cancelLend will just make the token unrentable, the exist rents won't be affected.
-    /// @param tokenIdx The idx of the NFToken
-    function cancelLend(uint256 tokenIdx) external {
-        TokenDetail detail = tokenDetails[tokenIdx];
-        require(msg.sender == detail.depositor, "Lent can only be cancelled by the depositor");
-        require(detail.status == TokenStatus.RENTABLE, "Lent can only be cancelled when it is rentable");
-
-        detail.status = TokenStatus.UNRENTABLE;
-        tokenDetails[tokenIdx] = detail;
-
-        emit LentCancelled(msg.sender, detail.token.contract_, detail.token.tokenId);
+    /// @notice create a vault contract for each owner
+    function _createVault(address owner) internal {
+        OwnerVault ov = new OwnerVault(address(this));
+        ov.transferOwnership(owner);
+        vaults[owner] = address(ov);
     }
 
-    /// @notice check if a given address is renting a token for a given NFT contract.
-    function checkRent(address renter, address contract_) external view returns (uint256 tokenId, uint256 endTime) {
-        uint256 rentIdx = lastingRents[renter][contract_];
-        if (rentIdx == 0) {
-            return (0, 0);
-        }
-
-        Rent rent = rents[rentIdx];
-        return (rent.token.tokenId, rent.endTime);
-    }
-
-    /// @notice contractSet setter
-    function setPartners(address contract_, address feeReceiver_, uint256 commission_) onlyOwner {
+    /// @notice partners setter
+    function setPartners(address contract_, address feeReceiver_, uint256 commission_) external onlyOwner {
         require(commission_ <= feeBase, "Partner commission too big");
-        Partner ptn = partners[contract_];
+        Partner storage ptn = partners[contract_];
         ptn.feeReceiver = feeReceiver_;
-        ptn.commission_ = ptn.commission_;
+        ptn.commission = commission_;
         partners[contract_] = ptn;
+        partnerContracts.add(contract_);
     }
 
-    /// @notice LeastRentPeriod setter
-    function setLeastRentPeriod(uint256 unitTime_) onlyOwner {
+    /// @notice UnitTime setter
+    function setUnitTime(uint256 unitTime_) external onlyOwner {
         unitTime = unitTime_;
     }
 
-    /// @notice LeastRentPeriod getter
-    function unitTime() external view returns (uint256) {
-        return unitTime;
-    }
-
     /// @notice Commission setter
-    function setCommission(uint256 commission_) onlyOwner {
+    function setCommission(uint256 commission_) external onlyOwner {
         require(commission_ <= 1000, "Commission too big");
         commission = commission_;
     }
 
-    /// @notice Commission getter
-    function commission() external view returns (uint256) {
-        return commission;
+    /// @notice adVault setter
+    function setAdVault(address adVault_) external onlyOwner {
+        adVault = adVault_;
     }
 
-    /// @notice Vault setter
-    function setVault(address vault_) onlyOwner {
-        vault = vault_;
+    /// @notice owners getter
+    function getOwners() public view returns (address[] memory) {
+        return owners.values();
     }
 
-    /// @dev Send ether
-    function _pay(address payable recipient, uint256 amount, bool errorOnFail) internal {
+    /// @notice partnerContracts getter
+    function getPartnerContracts() public view returns (address[] memory) {
+        return partnerContracts.values();
+    }
+
+    /// @notice tokenContracts getter
+    function getTokenContracts() public view returns (address[] memory) {
+        return tokenContracts.values();
+    }
+
+    /// @notice pay ether
+    function _payEther(address payable recipient, uint256 amount) private {
+        if (amount == 0) return;
         (bool sent,) = recipient.call{value: amount}("");
-        require(sent || errorOnFail, "SEND_ETHER_FAILED");
+        require(sent, "SEND_ETHER_FAILED");
     }
 
+    /// @notice pay ether or ERC20
+    function _pay(address payment, address recipient, uint256 amount) private {
+        if (amount == 0) return;
+        if (payment == address(0)) {
+            _payEther(payable(recipient), amount);
+        } else {
+            ERC20(payment).safeTransfer(recipient, amount);
+        }
+    }
 
     /// @dev Helper function to compute hash for a given token
-    function _tokenHash(address contract_, uint256 tokenId) internal view returns (bytes32) {
+    function getTokenHash(address contract_, uint256 tokenId) public pure returns (bytes32) {
         return keccak256(abi.encodePacked(contract_,  tokenId));
     }
 }

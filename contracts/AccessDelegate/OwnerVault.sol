@@ -1,14 +1,13 @@
+// SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.4;
 
-
-import {AccessDelegate} from "./AccessDelegateV1.sol";
+import {AccessDelegate} from "./AccessDelegate.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 
+import {IERC721Vault} from "./interfaces/IERC721Vault.sol";
 
-import {ERC721VaultInterface} from "./interfaces/ERC721VaultInterface.sol";
-
-contract ERC721Vault is Ownable, ERC721VaultInterface {
+contract OwnerVault is Ownable, IERC721Vault {
     address public accessDelegate;
 
     constructor(address accessDelegate_) {
@@ -17,12 +16,12 @@ contract ERC721Vault is Ownable, ERC721VaultInterface {
 
     modifier ERC721NotRented(address contract_, uint256 tokenId) {
         AccessDelegate ad = AccessDelegate(accessDelegate);
-        require(!ad.isNFTokenRented(contract_, tokenId), "Rented");
+        require(!ad.isNFTokenRented(contract_, tokenId), "AccessDelegate: Token is rented");
         _;
     }
 
-    function transferERC721(address contract_, uint256 tokenId, address to)
-        override external onlyOwner ERC721NotRented(contract_, tokenId) {
+    function transferERC721(address contract_, uint256 id, address to)
+        external override onlyOwner ERC721NotRented(contract_, id) {
         ERC721(contract_).transferFrom(address(this), to, id);
     }
 
