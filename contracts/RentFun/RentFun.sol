@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.4;
 
-import {OwnerVault} from "./OwnerVault.sol";
+import "./Enum.sol";
+import "./OwnerVault.sol";
+import "./interfaces/IRentFun.sol";
 
-import {SafeMath} from "@openzeppelin/contracts/utils/math/SafeMath.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import "hardhat/console.sol";
 
-contract AccessDelegate is Ownable {
+contract RentFun is Ownable, IRentFun {
     using SafeMath for uint256;
     using SafeERC20 for ERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -28,16 +30,6 @@ contract AccessDelegate is Ownable {
     /// @notice A mapping pointing owner address to its asset contract.
     mapping(address => address) public vaults;
 
-    /// @notice rent status
-    /// @dev RENTED can still be RENTABLE if the endTime is expired
-    /// @dev UNRENTABLE means no more rental but can still be rented as the last rental may not expire.
-    enum RentStatus {
-        NONE,
-        RENTABLE,
-        RENTED,
-        UNRENTABLE
-    }
-
     struct TokenDetail {
         address contract_;
         uint256 tokenId;
@@ -45,19 +37,14 @@ contract AccessDelegate is Ownable {
         address vault;
         address payment;
         uint256 unitFee;
-        // The total number of times this token is rented
-        uint256 totalCount;
-        uint256 totalFee;
-        uint256 totalAmount;
         uint256 lastRentIdx;
         uint256 endTime;
-        RentStatus rentStatus;
+        Enum.RentStatus rentStatus;
     }
 
     struct Partner {
         address feeReceiver;
         uint256 commission;
-        uint256 totalFee;
     }
 
     /// @notice All Partners' contracts
@@ -79,19 +66,6 @@ contract AccessDelegate is Ownable {
     /// @notice A mapping pointing token hash to tokenId
     mapping(bytes32 => uint256) public tokenIdxes;
 
-    /// @notice All Tokens' contracts
-    EnumerableSet.AddressSet internal tokenContracts;
-    /// @notice A mapping pointing token's contract address to related token indexes
-    mapping(address => EnumerableSet.UintSet) internal tokenIndexesByContract;
-
-    struct Rental {
-        address renter;
-        address contract_;
-        uint256 tokenId;
-        address vault;
-        uint256 endTime;
-    }
-
     /// @notice An incrementing counter to create unique idx for each rental
     uint256 public totalRentCount = 0;
 
@@ -104,15 +78,15 @@ contract AccessDelegate is Ownable {
     mapping(address => mapping(address => EnumerableSet.UintSet)) internal personalRentals;
 
     /// @notice Emitted on each token lent
-    event TokenDelegated(address indexed depositer, address indexed contract_, uint256 tokenId, uint256 unitFee);
+    event TokenLent(address indexed depositer, address indexed contract_, uint256 tokenId, uint256 unitFee);
 
     /// @notice Emitted on each token rental
-    event TokenRented(address indexed renter, uint256 tokenIdx, uint256 rentIdx, address indexed contract_, uint256 tokenId);
+    event TokenRented(address indexed renter, uint256 rentIdx, address indexed contract_, uint256 tokenId);
 
     /// @notice Emitted on each token lent cancel
-    event TokenUndelegated(address indexed depositor, uint256 tokenIdx, address indexed contract_, uint256 tokenId);
+    event LentCanceled(address indexed depositor, address indexed contract_, uint256 tokenId);
 
-    constructor(address adVault_, uint256 unitTime_, uint256 commission_) {
+    function initialize(address adVault_, uint256 unitTime_, uint256 commission_) external onlyOwner {
         // The commission cannot exceed 10%
         require(commission_ <= 1000, "commission too big");
         adVault = adVault_;
@@ -127,11 +101,12 @@ contract AccessDelegate is Ownable {
         _createVault(msg.sender);
     }
 
-    /// @notice delegate an NFToken to RentFun
+    /// @notice lend an NFToken
     /// @param contract_ The NFToken contract that issue the tokens
     /// @param tokenId The id the NFToken
+    /// @param payment The contract of payment way
     /// @param unitFee The unit rental price
-    function delegateNFToken(address contract_, uint256 tokenId, address payment, uint256 unitFee) external {
+    function lend(address contract_, uint256 tokenId, address payment, uint256 unitFee) external override {
         require(paymentContracts.contains(payment), "Payment contract is not supported");
 
         if (vaults[msg.sender] == address(0)) {
@@ -144,109 +119,75 @@ contract AccessDelegate is Ownable {
         }
 
         bytes32 tokenHash = getTokenHash(contract_, tokenId);
-        uint256 tokenIdx = tokenIdxes[tokenHash];
-        TokenDetail memory detail;
-        if (tokenIdx == 0) {
-            // The token is delegated for the first time
-            tokenIdx = nextTokenIdx++;
-            detail = TokenDetail(contract_, tokenId, msg.sender, vault, payment, unitFee, 0, 0, 0, 0, 0, RentStatus.RENTABLE);
-            tokenIdxes[tokenHash] = tokenIdx;
-        } else {
-            // The token has ever been delegated, just update its detail
-            detail = tokenDetails[tokenIdx];
-            detail.depositor = msg.sender;
-            detail.vault = vault;
-            detail.payment = payment;
-            detail.unitFee = unitFee;
-            detail.rentStatus = RentStatus.RENTABLE;
-        }
+        if (tokenIdxes[tokenHash] == 0) tokenIdxes[tokenHash] = nextTokenIdx++;
+        tokenDetails[tokenIdxes[tokenHash]] = TokenDetail(contract_, tokenId, msg.sender, vault, payment, unitFee,
+            tokenDetails[tokenIdxes[tokenHash]].lastRentIdx,
+            tokenDetails[tokenIdxes[tokenHash]].endTime, Enum.RentStatus.RENTABLE);
 
-//        console.log("detail.payment", detail.payment);
-        tokenDetails[tokenIdx] = detail;
-        tokenContracts.add(contract_);
-        tokenIndexesByContract[contract_].add(tokenIdx);
-
-        emit TokenDelegated(msg.sender, contract_, tokenId, unitFee);
+        emit TokenLent(msg.sender, contract_, tokenId, unitFee);
     }
 
     /// @notice rent a token only if the token is available
-    /// @param tokenIdx The only index for each NFToken
+    /// @param contract_ The NFToken contract that issue the tokens
+    /// @param tokenId The id the NFToken
     /// @param amount The amount of unitTime and this rental's total time will be unitTime * amount
-    function rentNFToken(uint256 tokenIdx, uint256 amount) external payable {
+    function rent(address contract_, uint256 tokenId, uint256 amount) external payable override {
+        bytes32 tokenHash = getTokenHash(contract_, tokenId);
+        uint256 tokenIdx = tokenIdxes[tokenHash];
         TokenDetail memory detail = tokenDetails[tokenIdx];
-        require(detail.rentStatus == RentStatus.RENTABLE ||
-        (detail.rentStatus == RentStatus.RENTED && detail.endTime < block.timestamp), "Token is not rentable");
+        require(detail.rentStatus == Enum.RentStatus.RENTABLE ||
+        (detail.rentStatus == Enum.RentStatus.RENTED && detail.endTime < block.timestamp), "Token is not rentable");
         require(amount > 0, "Rent period too short");
-        require(detail.vault == ERC721(detail.contract_).ownerOf(detail.tokenId), "Token was not owned by its vault");
+        require(detail.vault == ERC721(contract_).ownerOf(tokenId), "Token was not owned by its vault");
         uint256 totalFee = detail.unitFee.mul(amount);
         if (detail.payment == address(0)) require(msg.value == totalFee, "WRONG_FEE");
-
         uint256 platformFee = totalFee.mul(commission).div(feeBase);
         uint256 rentFee = totalFee.sub(platformFee);
-        Partner memory ptn = partners[detail.contract_];
-        uint256 partnerFee = platformFee.mul(ptn.commission).div(feeBase);
+        uint256 partnerFee = platformFee.mul(partners[contract_].commission).div(feeBase);
         platformFee = platformFee.sub(partnerFee);
         _pay(detail.payment, msg.sender, detail.depositor, rentFee);
-        _pay(detail.payment, msg.sender, ptn.feeReceiver, partnerFee);
+        _pay(detail.payment, msg.sender, partners[contract_].feeReceiver, partnerFee);
         _pay(detail.payment, msg.sender, adVault, platformFee);
-        // update total fee
-        ptn.totalFee = ptn.totalFee.add(partnerFee);
-        partners[detail.contract_] = ptn;
-        payments[detail.payment] = payments[detail.payment].add(totalFee);
 
         // update detail
-        ++detail.totalCount;
-        detail.totalFee = detail.totalFee.add(rentFee);
-        detail.totalAmount = detail.totalAmount.add(amount);
         detail.lastRentIdx = ++totalRentCount;
         detail.endTime = block.timestamp.add(unitTime.mul(amount));
-        detail.rentStatus = RentStatus.RENTED;
+        detail.rentStatus = Enum.RentStatus.RENTED;
         tokenDetails[tokenIdx] = detail;
 
         // update rentals
-        rentals[totalRentCount] = Rental(msg.sender, detail.contract_, detail.tokenId, detail.vault, detail.endTime);
-        personalRentals[msg.sender][detail.contract_].add(totalRentCount);
+        rentals[totalRentCount] = Rental(msg.sender, contract_, tokenId, detail.vault, detail.endTime);
+        personalRentals[msg.sender][contract_].add(totalRentCount);
 
-        emit TokenRented(msg.sender, tokenIdx, detail.lastRentIdx, detail.contract_, detail.tokenId);
+        emit TokenRented(msg.sender, detail.lastRentIdx, contract_, tokenId);
     }
 
-    /// @notice undelegate an NFToken will just make it unrentable, the exist rents won't be affected.
-    /// @param tokenIdx The idx of the NFToken
-    function undelegateNFToken(uint256 tokenIdx) external {
-        TokenDetail memory detail = tokenDetails[tokenIdx];
-        require(msg.sender == detail.depositor, "Undelegate can only be done by the depositor");
-        require(detail.rentStatus != RentStatus.UNRENTABLE, "Token is already UNRENTABLE");
+    /// @notice cancel lend an NFToken will just make it unrentable, the exist rents won't be affected.
+    /// @param contract_ The NFToken contract that issue the tokens
+    /// @param tokenId The id the NFToken
+    function cancelLend(address contract_, uint256 tokenId) external override {
+        bytes32 tokenHash = getTokenHash(contract_, tokenId);
+        uint256 tokenIdx = tokenIdxes[tokenHash];
+        require(msg.sender == tokenDetails[tokenIdx].depositor, "Undelegate can only be done by the depositor");
+        require(tokenDetails[tokenIdx].rentStatus != Enum.RentStatus.UNRENTABLE, "Token is already UNRENTABLE");
+        tokenDetails[tokenIdx].rentStatus = Enum.RentStatus.UNRENTABLE;
 
-        detail.rentStatus = RentStatus.UNRENTABLE;
-        tokenDetails[tokenIdx] = detail;
-
-        emit TokenUndelegated(msg.sender, tokenIdx, detail.contract_, detail.tokenId);
+        emit LentCanceled(msg.sender, contract_, tokenId);
     }
 
     /// @notice check if a given token is rented or not
-    function isNFTokenRented(address contract_, uint256 tokenId) public view returns (bool) {
+    function isRented(address contract_, uint256 tokenId) public override view returns  (bool) {
         bytes32 tokenHash = getTokenHash(contract_, tokenId);
-        uint256 tokenIdx = tokenIdxes[tokenHash];
-        if (tokenIdx == 0) return false;
+        if (tokenIdxes[tokenHash] == 0) return false;
 
-        TokenDetail memory detail = tokenDetails[tokenIdx];
         /// @dev Undelegate A token that has never been rented will make it UNRENTABLE while
         /// detail.endTime is still 0
-        return detail.rentStatus != RentStatus.UNRENTABLE || detail.endTime >= block.timestamp;
-    }
-
-    /// @notice check all rentals for a given renter.
-    function getFullRentals(address renter, address contract_) external view returns (Rental[] memory fullRentals) {
-        uint256[] memory rentIdxes = personalRentals[renter][contract_].values();
-        if (rentIdxes.length == 0) return fullRentals;
-        fullRentals = new Rental[](rentIdxes.length);
-        for(uint i = 0; i < rentIdxes.length; i++) {
-            fullRentals[i] = rentals[rentIdxes[i]];
-        }
+        return tokenDetails[tokenIdxes[tokenHash]].rentStatus != Enum.RentStatus.UNRENTABLE ||
+            tokenDetails[tokenIdxes[tokenHash]].endTime >= block.timestamp;
     }
 
     /// @notice check all alive rentals for a given renter.
-    function getAliveRentals(address renter, address contract_) public view returns (Rental[] memory aliveRentals) {
+    function getAliveRentals(address renter, address contract_) public override view returns (Rental[] memory aliveRentals) {
         uint256[] memory rentIdxes = personalRentals[renter][contract_].values();
         uint256 count = 0;
         for(uint i = 0; i < rentIdxes.length; i++) {
@@ -260,27 +201,6 @@ contract AccessDelegate is Ownable {
         }
     }
 
-    /// @notice get renting tokens by contract
-    function getRentableTokens(address contract_) public view returns(TokenDetail[] memory details) {
-        uint256[] memory tokenIndexes = tokenIndexesByContract[contract_].values();
-        uint256 count = 0;
-        TokenDetail memory detail;
-        for(uint i = 0; i < tokenIndexes.length; i++) {
-            detail = tokenDetails[tokenIndexes[i]];
-            if (!isNFTokenRented(detail.contract_, detail.tokenId)) {
-                count++;
-            }
-        }
-        if (count == 0) return details;
-
-        details = new TokenDetail[](count);
-        uint j = 0;
-        for(uint i = 0; i < tokenIndexes.length; i++) {
-            detail = tokenDetails[tokenIndexes[i]];
-            if (!isNFTokenRented(detail.contract_, detail.tokenId)) details[j++] = detail;
-        }
-    }
-
     /// @notice create a vault contract for each owner
     function _createVault(address owner) internal {
         OwnerVault ov = new OwnerVault(address(this));
@@ -291,10 +211,7 @@ contract AccessDelegate is Ownable {
     /// @notice partners setter
     function setPartners(address contract_, address feeReceiver_, uint256 commission_) external onlyOwner {
         require(commission_ <= feeBase, "Partner commission too big");
-        Partner storage ptn = partners[contract_];
-        ptn.feeReceiver = feeReceiver_;
-        ptn.commission = commission_;
-        partners[contract_] = ptn;
+        partners[contract_] = Partner(feeReceiver_, commission_);
         partnerContracts.add(contract_);
     }
 
@@ -327,16 +244,6 @@ contract AccessDelegate is Ownable {
     /// @notice getPaymentContracts getter
     function getPaymentContracts() public view returns (address[] memory) {
         return paymentContracts.values();
-    }
-
-    /// @notice partnerContracts getter
-    function getPartnerContracts() public view returns (address[] memory) {
-        return partnerContracts.values();
-    }
-
-    /// @notice tokenContracts getter
-    function getTokenContracts() public view returns (address[] memory) {
-        return tokenContracts.values();
     }
 
     /// @notice pay ether or ERC20

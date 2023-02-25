@@ -4,7 +4,7 @@ import { Signer, Contract, ContractFactory } from "ethers";
 import {parseEther} from "ethers/lib/utils";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
 
-describe("AccessDelegate", () => {
+describe("RentFun", () => {
     let NFToken: Contract;
     let RentToken: Contract;
     let alice: Signer;
@@ -15,10 +15,10 @@ describe("AccessDelegate", () => {
     let bobAddr: string;
     let carolAddr: string;
     let devAddr: string;
-    let AccessDelegate: Contract;
+    let RentFun: Contract;
     let NFTokenAddress: string;
     let RentTokenAddress: string;
-    let AccessDelegateAddress: string;
+    let RentFunAddress: string;
     const Hour = 60 * 60;
     let OwnerVaultFactory: ContractFactory;
     const AddressZero = ethers.constants.AddressZero;
@@ -49,24 +49,26 @@ describe("AccessDelegate", () => {
         const carolRent = await RentToken.balanceOf(carolAddr);
         expect(carolRent).to.equal(parseEther("10"));
 
-        const AccessDelegateFactory = await ethers.getContractFactory("AccessDelegate");
-        AccessDelegate = await AccessDelegateFactory.deploy(aliceAddr, Hour, 1000);
-        await AccessDelegate.deployed();
-        AccessDelegateAddress = AccessDelegate.address;
-        console.log("AccessDelegate", AccessDelegateAddress);
+        const RentFunFactory = await ethers.getContractFactory("RentFun");
+        RentFun = await RentFunFactory.deploy();
+        await RentFun.deployed();
+        await expect(RentFun.initialize(aliceAddr, Hour, 1000)).to.be.ok;
+
+        RentFunAddress = RentFun.address;
+        console.log("RentFun", RentFunAddress);
         OwnerVaultFactory = await ethers.getContractFactory("OwnerVault");
 
-        expect(await AccessDelegate.setPartners(NFTokenAddress, aliceAddr, 5000)).to.be.ok;
-        expect(await AccessDelegate.setUnitTime(Hour)).to.be.ok;
-        expect(await AccessDelegate.setCommission(1000)).to.be.ok;
-        expect(await AccessDelegate.setAdVault(devAddr)).to.be.ok;
+        expect(await RentFun.setPartners(NFTokenAddress, aliceAddr, 5000)).to.be.ok;
+        expect(await RentFun.setUnitTime(Hour)).to.be.ok;
+        expect(await RentFun.setCommission(1000)).to.be.ok;
+        expect(await RentFun.setAdVault(devAddr)).to.be.ok;
     });
 
-    // function delegateNFToken(address contract_, uint256 tokenId, uint256 unitFee) external {
+    // function lend(address contract_, uint256 tokenId, uint256 unitFee) external {
 
-    describe("delegateNFToken", () => {
+    describe("lend", () => {
         it("should reverted with the tokenID is not minted", async () => {
-            await expect(AccessDelegate.delegateNFToken(NFTokenAddress, 1, AddressZero, 1000)).to.be.revertedWith(
+            await expect(RentFun.lend(NFTokenAddress, 1, AddressZero, 1000)).to.be.revertedWith(
                 "ERC721: invalid token ID"
             );
         });
@@ -74,16 +76,16 @@ describe("AccessDelegate", () => {
         it("should reverted with the msg.sender is not the owner of the token", async () => {
             await NFToken.mintCollectionNFT(aliceAddr, 1);
             await NFToken.mintCollectionNFT(bobAddr, 2);
-            await expect(AccessDelegate.delegateNFToken(NFTokenAddress, 2, AddressZero, 1000)).to.be.revertedWith(
+            await expect(RentFun.lend(NFTokenAddress, 2, AddressZero, 1000)).to.be.revertedWith(
                 "ERC721: caller is not token owner or approved"
             );
 
-            await expect(AccessDelegate.connect(bob).delegateNFToken(NFTokenAddress, 1, AddressZero, 1000)).to.be.revertedWith(
+            await expect(RentFun.connect(bob).lend(NFTokenAddress, 1, AddressZero, 1000)).to.be.revertedWith(
                 "ERC721: caller is not token owner or approved"
             );
 
             // revert without approve
-            await expect(AccessDelegate.delegateNFToken(NFTokenAddress, 1, AddressZero, 1000)).to.be.revertedWith(
+            await expect(RentFun.lend(NFTokenAddress, 1, AddressZero, 1000)).to.be.revertedWith(
                 "ERC721: caller is not token owner or approved"
             );
         });
@@ -92,80 +94,82 @@ describe("AccessDelegate", () => {
             await NFToken.mintCollectionNFT(aliceAddr, 1);
             await NFToken.mintCollectionNFT(bobAddr, 2);
 
-            let nextTokenIdx = await AccessDelegate.nextTokenIdx();
+            let nextTokenIdx = await RentFun.nextTokenIdx();
             expect(nextTokenIdx).to.equal(1);
 
-            expect(await NFToken.approve(AccessDelegateAddress, 1)).to.be.ok;
-            expect(await AccessDelegate.delegateNFToken(NFTokenAddress, 1, AddressZero, 1000)).to.be.ok;
-            const aliceVaultAddr = await AccessDelegate.vaults(aliceAddr);
+            expect(await NFToken.approve(RentFunAddress, 1)).to.be.ok;
+            expect(await RentFun.lend(NFTokenAddress, 1, AddressZero, 1000)).to.be.ok;
+            const aliceVaultAddr = await RentFun.vaults(aliceAddr);
             console.log("aliceVaultAddr", aliceVaultAddr);
             let tokenOwner = await NFToken.ownerOf(1);
             expect(tokenOwner).to.equal(aliceVaultAddr);
-            nextTokenIdx = await AccessDelegate.nextTokenIdx();
+            nextTokenIdx = await RentFun.nextTokenIdx();
             expect(nextTokenIdx).to.equal(2);
 
-            const td1 = await AccessDelegate.tokenDetails(1);
+            const td1 = await RentFun.tokenDetails(1);
             expect(td1.contract_).to.equal(NFTokenAddress);
+            expect(td1.tokenId).to.equal(1);
             expect(td1.depositor).to.equal(aliceAddr);
             expect(td1.unitFee).to.equal(1000);
             expect(td1.rentStatus).to.equal(1);
 
-            expect(await NFToken.connect(bob).approve(AccessDelegateAddress, 2)).to.be.ok;
-            expect(await AccessDelegate.connect(bob).delegateNFToken(NFTokenAddress, 2, AddressZero, 3000)).to.be.ok;
+            expect(await NFToken.connect(bob).approve(RentFunAddress, 2)).to.be.ok;
+            expect(await RentFun.connect(bob).lend(NFTokenAddress, 2, AddressZero, 3000)).to.be.ok;
 
-            const bobVaultAddr = await AccessDelegate.vaults(bobAddr);
+            const bobVaultAddr = await RentFun.vaults(bobAddr);
             console.log("bobVaultAddr", bobVaultAddr);
             tokenOwner = await NFToken.ownerOf(2);
             expect(tokenOwner).to.equal(bobVaultAddr);
-            nextTokenIdx = await AccessDelegate.nextTokenIdx();
+            nextTokenIdx = await RentFun.nextTokenIdx();
             expect(nextTokenIdx).to.equal(3);
 
-            const td2 = await AccessDelegate.tokenDetails(2);
+            const td2 = await RentFun.tokenDetails(2);
             expect(td2.contract_).to.equal(NFTokenAddress);
             expect(td2.depositor).to.equal(bobAddr);
             expect(td2.unitFee).to.equal(3000);
             expect(td2.rentStatus).to.equal(1);
         });
 
-        it("should reverted with token is rented while trying transferERC721", async () => {
+        it("should reverted with token is rented while trying transferNFT", async () => {
             await NFToken.mintCollectionNFT(aliceAddr, 1);
-            expect(await NFToken.approve(AccessDelegateAddress, 1)).to.be.ok;
-            expect(await AccessDelegate.delegateNFToken(NFTokenAddress, 1, AddressZero, parseEther("1"))).to.be.ok;
+            expect(await NFToken.approve(RentFunAddress, 1)).to.be.ok;
+            expect(await RentFun.lend(NFTokenAddress, 1, AddressZero, parseEther("1"))).to.be.ok;
             let tokenOwner = await NFToken.ownerOf(1);
-            const aliceVaultAddr = await AccessDelegate.vaults(aliceAddr);
+            const aliceVaultAddr = await RentFun.vaults(aliceAddr);
             expect(tokenOwner).to.equal(aliceVaultAddr);
-            let isRented = await AccessDelegate.isNFTokenRented(NFTokenAddress, 1);
+
+            let isRented = await RentFun.isRented(NFTokenAddress, 1);
             expect(isRented).to.be.true;
             const OwnerVault = OwnerVaultFactory.attach(aliceVaultAddr);
-            await expect(OwnerVault.connect(alice).transferERC721(NFTokenAddress, 1, aliceAddr)).to.be.revertedWith(
-                "AccessDelegate: Token is rented"
+            await expect(OwnerVault.connect(alice).transferNFT(NFTokenAddress, 1, aliceAddr)).to.be.revertedWith(
+                "RentFun: Token is rented"
             );
 
-            expect(await AccessDelegate.undelegateNFToken(1)).to.be.ok;
-            expect(await OwnerVault.connect(alice).transferERC721(NFTokenAddress, 1, aliceAddr)).to.be.ok;
+            expect(await RentFun.cancelLend(NFTokenAddress, 1)).to.be.ok;
+            expect(await OwnerVault.connect(alice).transferNFT(NFTokenAddress, 1, aliceAddr)).to.be.ok;
             tokenOwner = await NFToken.ownerOf(1);
             expect(tokenOwner).to.equal(aliceAddr);
 
-            // transferERC721 will fail if the token is rented
-            expect(await NFToken.approve(AccessDelegateAddress, 1)).to.be.ok;
-            expect(await AccessDelegate.delegateNFToken(NFTokenAddress, 1, AddressZero, parseEther("1"))).to.be.ok;
-            const rentTx = await AccessDelegate.connect(carol).rentNFToken(1, 3, {value: parseEther("3")});
+            // transferNFT will fail if the token is rented
+            expect(await NFToken.approve(RentFunAddress, 1)).to.be.ok;
+            expect(await RentFun.lend(NFTokenAddress, 1, AddressZero, parseEther("1"))).to.be.ok;
+            const rentTx = await RentFun.connect(carol).rent(NFTokenAddress, 1, 3, {value: parseEther("3")});
             expect(rentTx).to.be.ok;
-            isRented = await AccessDelegate.isNFTokenRented(NFTokenAddress, 1);
+            isRented = await RentFun.isRented(NFTokenAddress, 1);
             expect(isRented).to.be.true;
-            expect(await AccessDelegate.undelegateNFToken(1)).to.be.ok;
-            isRented = await AccessDelegate.isNFTokenRented(NFTokenAddress, 1);
+            expect(await RentFun.cancelLend(NFTokenAddress, 1)).to.be.ok;
+            isRented = await RentFun.isRented(NFTokenAddress, 1);
             expect(isRented).to.be.true;
             await time.increase(3600*3);
-            isRented = await AccessDelegate.isNFTokenRented(NFTokenAddress, 1);
+            isRented = await RentFun.isRented(NFTokenAddress, 1);
             expect(isRented).to.be.false;
-            expect(await OwnerVault.connect(alice).transferERC721(NFTokenAddress, 1, aliceAddr)).to.be.ok;
+            expect(await OwnerVault.connect(alice).transferNFT(NFTokenAddress, 1, aliceAddr)).to.be.ok;
         });
     })
 
-    describe("rentNFToken", () => {
+    describe("rent", () => {
         it("should reverted with token is not rentable", async () => {
-            await expect(AccessDelegate.connect(carol).rentNFToken(1, 3)).to.be.revertedWith(
+            await expect(RentFun.connect(carol).rent(NFTokenAddress, 1, 3)).to.be.revertedWith(
                 "Token is not rentable"
             );
         });
@@ -173,47 +177,43 @@ describe("AccessDelegate", () => {
         it("should be ok to rent an delegated NFToken", async () => {
             // alice delegate a token
             await NFToken.mintCollectionNFT(aliceAddr, 1);
-            expect(await NFToken.approve(AccessDelegateAddress, 1)).to.be.ok;
-            expect(await AccessDelegate.delegateNFToken(NFTokenAddress, 1, AddressZero, parseEther("1"))).to.be.ok;
+            expect(await NFToken.approve(RentFunAddress, 1)).to.be.ok;
+            expect(await RentFun.lend(NFTokenAddress, 1, AddressZero, parseEther("1"))).to.be.ok;
 
             // no rent before
-            let totalRentCount = await AccessDelegate.totalRentCount();
+            let totalRentCount = await RentFun.totalRentCount();
             expect(totalRentCount).to.be.equal(0);
-            let carolFullRentals = await AccessDelegate.getFullRentals(carolAddr, NFTokenAddress);
-            expect(carolFullRentals.length).to.equal(0);
-            let carolAliveRentals = await AccessDelegate.getAliveRentals(carolAddr, NFTokenAddress);
+            // let carolFullRentals = await RentFun.getFullRentals(carolAddr, NFTokenAddress);
+            // expect(carolFullRentals.length).to.equal(0);
+            let carolAliveRentals = await RentFun.getAliveRentals(carolAddr, NFTokenAddress);
             expect(carolAliveRentals.length).to.equal(0);
 
 
             const carolBalanceBeforeRent = await carol.getBalance();
             // after a rent
-            const rentTx = await AccessDelegate.connect(carol).rentNFToken(1, 3, {value: parseEther("3")});
+            const rentTx = await RentFun.connect(carol).rent(NFTokenAddress, 1, 3, {value: parseEther("3")});
             expect(rentTx).to.be.ok;
 
-            totalRentCount = await AccessDelegate.totalRentCount();
+            totalRentCount = await RentFun.totalRentCount();
             expect(totalRentCount).to.be.equal(1);
-            const td1 = await AccessDelegate.tokenDetails(1);
-            expect(td1.totalCount).to.be.equal(1);
-            expect(td1.totalFee).to.be.equal(parseEther("2.7"));
-            expect(td1.totalAmount).to.be.equal(3);
-            expect(td1.lastRentIdx).to.be.equal(totalRentCount);
+            const td1 = await RentFun.tokenDetails(1);
+            expect(td1.lastRentIdx).to.be.equal(1);
             expect(td1.rentStatus).to.equal(2);
 
-            const ptn = await AccessDelegate.partners(NFTokenAddress);
+            const ptn = await RentFun.partners(NFTokenAddress);
             expect(ptn.feeReceiver).to.equal(aliceAddr);
             expect(ptn.commission).to.equal(5000);
-            expect(ptn.totalFee).to.equal(parseEther("0.15"));
 
-            const aliceVaultAddr = await AccessDelegate.vaults(aliceAddr);
-            const rental = await AccessDelegate.rentals(totalRentCount);
+            const aliceVaultAddr = await RentFun.vaults(aliceAddr);
+            const rental = await RentFun.rentals(totalRentCount);
             expect(rental.renter).to.equal(carolAddr);
             expect(rental.contract_).to.equal(NFTokenAddress);
             expect(rental.tokenId).to.equal(1);
             expect(rental.vault).to.equal(aliceVaultAddr);
 
-            carolFullRentals = await AccessDelegate.getFullRentals(carolAddr, NFTokenAddress);
-            carolAliveRentals = await AccessDelegate.getAliveRentals(carolAddr, NFTokenAddress);
-            expect(rental.toString()).to.equal(carolFullRentals[0].toString());
+            // carolFullRentals = await RentFun.getFullRentals(carolAddr, NFTokenAddress);
+            carolAliveRentals = await RentFun.getAliveRentals(carolAddr, NFTokenAddress);
+            // expect(rental.toString()).to.equal(carolFullRentals[0].toString());
             expect(rental.toString()).to.equal(carolAliveRentals[0].toString());
 
             const carolBalanceAfterRent = await carol.getBalance();
@@ -226,25 +226,25 @@ describe("AccessDelegate", () => {
     describe("ERC20 token as payment mode", () => {
         it("should reverted with Payment contract is not supported trying to delegate an NFToken", async () => {
             await NFToken.mintCollectionNFT(aliceAddr, 1);
-            expect(await NFToken.approve(AccessDelegateAddress, 1)).to.be.ok;
-            await expect(AccessDelegate.delegateNFToken(NFTokenAddress, 1, RentTokenAddress, parseEther("1"))).to.be.revertedWith(
+            expect(await NFToken.approve(RentFunAddress, 1)).to.be.ok;
+            await expect(RentFun.lend(NFTokenAddress, 1, RentTokenAddress, parseEther("1"))).to.be.revertedWith(
                 "Payment contract is not supported"
             );
         });
 
         it("should be ok to take ERC20 token as payment", async () => {
-            expect(await AccessDelegate.addPayment(RentTokenAddress)).to.be.ok;
+            expect(await RentFun.addPayment(RentTokenAddress)).to.be.ok;
             await NFToken.mintCollectionNFT(bobAddr, 2);
-            expect(await NFToken.connect(bob).approve(AccessDelegateAddress, 2)).to.be.ok;
-            await expect(AccessDelegate.connect(bob).delegateNFToken(NFTokenAddress, 2, RentTokenAddress, parseEther("1"))).to.be.ok;
+            expect(await NFToken.connect(bob).approve(RentFunAddress, 2)).to.be.ok;
+            await expect(RentFun.connect(bob).lend(NFTokenAddress, 2, RentTokenAddress, parseEther("1"))).to.be.ok;
 
-            expect(await RentToken.connect(carol).approve(AccessDelegateAddress, parseEther("10000"))).to.be.ok;
-            let nextTokenIdx = await AccessDelegate.nextTokenIdx();
+            expect(await RentToken.connect(carol).approve(RentFunAddress, parseEther("10000"))).to.be.ok;
+            let nextTokenIdx = await RentFun.nextTokenIdx();
             expect(nextTokenIdx).to.equal(2);
-            const td1 = await AccessDelegate.tokenDetails(1);
+            const td1 = await RentFun.tokenDetails(1);
             expect(td1.payment).to.be.equal(RentTokenAddress);
 
-            const rentTx = await AccessDelegate.connect(carol).rentNFToken(1, 3);
+            const rentTx = await RentFun.connect(carol).rent(NFTokenAddress, 2, 3);
             expect(rentTx).to.be.ok;
 
             const carolRent = await RentToken.balanceOf(carolAddr);

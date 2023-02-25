@@ -13,7 +13,7 @@ const deploy: DeployFunction = async function (
     const { deployer } = await getNamedAccounts();
     const { deploy } = deployments;
 
-    await deploy("NFToken", {
+    await deploy("RentFun", {
         from: deployer,
         args: [],
         log: true,
@@ -21,5 +21,5 @@ const deploy: DeployFunction = async function (
     });
 };
 
-deploy.tags = ['NFToken']
+deploy.tags = ['RentFun']
 export default deploy;

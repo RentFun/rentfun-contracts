@@ -14,7 +14,7 @@ const argv = yargs
     .version(false).argv;
 
 dotenv.config();
-const { INFURA_KEY, MNEMONIC, ETHERSCAN_API_KEY, PK} = process.env;
+const { INFURA_KEY, MNEMONIC, ETHERSCAN_API_KEY, API_URL, PRIVATE_KEY, PK} = process.env;
 
 const DEFAULT_MNEMONIC =
     "garlic path pool various surface pitch put near dutch strong whisper letter";
@@ -67,9 +67,10 @@ const userConfig: HardhatUserConfig = {
             ...sharedNetworkConfig,
             url: `https://goerli.infura.io/v3/${INFURA_KEY}`,
         },
-        kovan: {
-            ...sharedNetworkConfig,
-            url: `https://kovan.infura.io/v3/${INFURA_KEY}`,
+        ArbitrumGoerli: {
+            allowUnlimitedContractSize: true,
+            url: API_URL,
+            accounts: [`0x${PRIVATE_KEY}`],
         },
         volta: {
             ...sharedNetworkConfig,
