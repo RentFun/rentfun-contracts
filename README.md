@@ -28,10 +28,15 @@ Preparation:
 - Set `INFURA_KEY` in `.env`
 - Set `ETHERSCAN_API_KEY` in `.env`
 
+For Arbitrum
+- Set `API_URL` in `.env`
+- Set `PRIVATE_KEY` in `.env`
+
+
 ```bash
 yarn hardhat --network <network> deploy
 ```
-- network can be: mainnet, xdai, ewc, rinkeby, goerli, kovan, volta. add network to hardhat.config.ts if you'd like to support new network.
+- network can be: ArbitrumGoerli, mainnet, xdai, ewc, rinkeby, goerli, kovan, volta. add network to hardhat.config.ts if you'd like to support new network.
 
 
 
