@@ -1,8 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { Signer, Contract, ContractFactory, utils } from "ethers";
+import { Signer, Contract, utils } from "ethers";
 import {parseEther} from "ethers/lib/utils";
-import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { MerkleTree } from 'merkletreejs';
 
 describe("WonderTurtle", () => {
@@ -133,8 +132,31 @@ describe("WonderTurtle", () => {
             );
 
             const mintTx = WonderTurtle.connect(bob).mint(1, bobProof, {value: parseEther("0.04")});
-            expect(updateStageTx).to.be.ok;
+            expect(mintTx).to.be.ok;
             await expect(WonderTurtle.connect(bob).mint(2, bobProof, {value: parseEther("0.04")})).to.be.revertedWith(
+                "Exceeds mint limit"
+            );
+        });
+
+        it("mint fail and success after UpdateStage to 3", async () => {
+            const updateStageTx = await WonderTurtle.UpdateStage(3, ethers.utils.formatBytes32String(""), parseEther("0.06"), 3);
+            expect(updateStageTx).to.be.ok;
+
+            await expect(WonderTurtle.mint(951, [])).to.be.revertedWith(
+                "Exceeds max supply"
+            );
+
+            await expect(WonderTurtle.mint(1, [])).to.be.revertedWith(
+                "Price mismatch"
+            );
+
+            await expect(WonderTurtle.mint(2, [], {value: parseEther("0.06")})).to.be.revertedWith(
+                "Price mismatch"
+            );
+
+            const mintTx = WonderTurtle.connect(bob).mint(2, bobProof, {value: parseEther("0.12")});
+            expect(mintTx).to.be.ok;
+            await expect(WonderTurtle.connect(bob).mint(2, [], {value: parseEther("0.12")})).to.be.revertedWith(
                 "Exceeds mint limit"
             );
         });
