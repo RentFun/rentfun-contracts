@@ -6,20 +6,20 @@ import { HardhatRuntimeEnvironment } from "hardhat/types";
 // const AddressZero = "0x0000000000000000000000000000000000000000"
 // const data = "0x"
 
-const deploy: DeployFunction = async function (
+const deploy_owner_vault: DeployFunction = async function (
     hre: HardhatRuntimeEnvironment,
 ) {
     const { deployments, getNamedAccounts } = hre;
     const { deployer } = await getNamedAccounts();
     const { deploy } = deployments;
 
-    await deploy("RentFun", {
+    await deploy("OwnerVault", {
         from: deployer,
-        args: [],
+        args: ['0xf7a84D01F4041D8719d27a8268Dc097b257C04FC'],
         log: true,
         deterministicDeployment: true,
     });
 };
 
-deploy.tags = ['RentFun']
-export default deploy;
+deploy_owner_vault.tags = ['OwnerVault']
+export default deploy_owner_vault;

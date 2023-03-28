@@ -12,8 +12,6 @@ import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-import "hardhat/console.sol";
-
 contract RentFun is Ownable, IRentFun {
     using SafeMath for uint256;
     using SafeERC20 for ERC20;
@@ -24,7 +22,8 @@ contract RentFun is Ownable, IRentFun {
     uint256 public unitTime;
     uint256 public commission;
     uint256 public constant feeBase = 10000;
-    address public adVault;
+    address public treasure;
+    bool private initialized;
 
     EnumerableSet.AddressSet internal owners;
     /// @notice A mapping pointing owner address to its asset contract.
@@ -86,13 +85,14 @@ contract RentFun is Ownable, IRentFun {
     /// @notice Emitted on each token lent cancel
     event LentCanceled(address indexed depositor, address indexed contract_, uint256 tokenId);
 
-    function initialize(address adVault_, uint256 unitTime_, uint256 commission_) external onlyOwner {
-        // The commission cannot exceed 10%
-        require(commission_ <= 1000, "commission too big");
-        adVault = adVault_;
+    function initialize(address contractOwner, address treasure_, uint256 unitTime_, uint256 commission_) external {
+        require(!initialized, "Already initialized");
+        treasure = treasure_;
         unitTime = unitTime_;
         commission = commission_;
         paymentContracts.add(address(0));
+        _transferOwnership(contractOwner);
+        initialized = true;
     }
 
     /// @notice create a vault owned by msg.sender
@@ -147,7 +147,7 @@ contract RentFun is Ownable, IRentFun {
         platformFee = platformFee.sub(partnerFee);
         _pay(detail.payment, msg.sender, detail.depositor, rentFee);
         _pay(detail.payment, msg.sender, partners[contract_].feeReceiver, partnerFee);
-        _pay(detail.payment, msg.sender, adVault, platformFee);
+        _pay(detail.payment, msg.sender, treasure, platformFee);
 
         // update detail
         detail.lastRentIdx = ++totalRentCount;
@@ -226,9 +226,9 @@ contract RentFun is Ownable, IRentFun {
         commission = commission_;
     }
 
-    /// @notice adVault setter
-    function setAdVault(address adVault_) external onlyOwner {
-        adVault = adVault_;
+    /// @notice treasure setter
+    function setTreasure(address treasure_) external onlyOwner {
+        treasure = treasure_;
     }
 
     /// @notice add payment

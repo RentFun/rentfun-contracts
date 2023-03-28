@@ -52,7 +52,7 @@ describe("RentFun", () => {
         const RentFunFactory = await ethers.getContractFactory("RentFun");
         RentFun = await RentFunFactory.deploy();
         await RentFun.deployed();
-        await expect(RentFun.initialize(aliceAddr, Hour, 1000)).to.be.ok;
+        await expect(RentFun.initialize(aliceAddr, aliceAddr, Hour, 1000)).to.be.ok;
 
         RentFunAddress = RentFun.address;
         console.log("RentFun", RentFunAddress);
@@ -61,7 +61,7 @@ describe("RentFun", () => {
         expect(await RentFun.setPartners(NFTokenAddress, aliceAddr, 5000)).to.be.ok;
         expect(await RentFun.setUnitTime(Hour)).to.be.ok;
         expect(await RentFun.setCommission(1000)).to.be.ok;
-        expect(await RentFun.setAdVault(devAddr)).to.be.ok;
+        expect(await RentFun.setTreasure(devAddr)).to.be.ok;
     });
 
     // function lend(address contract_, uint256 tokenId, uint256 unitFee) external {

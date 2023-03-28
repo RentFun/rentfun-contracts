@@ -27,7 +27,7 @@ async function prepare(thisObject, contracts) {
 async function deploy(thisObject, contracts) {
   for (let i in contracts) {
     let contract = contracts[i]
-    thisObject[contract[0]] = await contract[1].deploy(...(contract[2] || []))
+    thisObject[contract[0]] = await contract[1].deploy_turtis(...(contract[2] || []))
     await thisObject[contract[0]].deployed()
   }
 }

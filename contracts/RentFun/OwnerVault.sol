@@ -23,6 +23,7 @@ contract OwnerVault is Ownable, IERC721Vault {
         external override onlyOwner NotRented(contract_, id) {
         ERC721(contract_).transferFrom(address(this), to, id);
     }
+}
 
 //    function transferERC20() external onlyOwner onlyOperatorIsOwner {
 //    }
@@ -30,9 +31,4 @@ contract OwnerVault is Ownable, IERC721Vault {
 //    function transferEther() external onlyOwner onlyOperatorIsOwner {
 //    }
 //
-//    /// @notice Operator setter
-//    function setOperator(address operator_) onlyRentFun {
-//        operator = operator_;
-//    }
-}
 
