@@ -36,7 +36,7 @@ For Arbitrum:
 ```bash
 yarn hardhat --network <network> deploy
 ```
-- network can be: ArbitrumGoerli, mainnet, xdai, ewc, rinkeby, goerli, kovan, volta. add network to hardhat.config.ts if you'd like to support new network.
+- network can be: ArbitrumGoerli, mainnet. add network to hardhat.config.ts if you'd like to support new network.
 
 
 

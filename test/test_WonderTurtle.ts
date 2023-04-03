@@ -22,6 +22,8 @@ describe("WonderTurtle", () => {
     let bobProof: string[];
     let devProof: string[];
     const { keccak256 } = utils;
+    const kevinAddr = '0x3353b44be83197747eB6a4b3B9d2e391c2A357d5';
+
 
     beforeEach(async () => {
         [alice, bob, carol, dev] = await ethers.getSigners();
@@ -44,7 +46,7 @@ describe("WonderTurtle", () => {
         devProof = merkleTree.getHexProof(keccak256(devAddr));
 
         const WonderTurtleFactory = await ethers.getContractFactory("WonderTurtle");
-        WonderTurtle = await WonderTurtleFactory.deploy(baseURI, merkleRootHash, aliceAddr, aliceAddr);
+        WonderTurtle = await WonderTurtleFactory.deploy(baseURI, merkleRootHash, aliceAddr);
         await WonderTurtle.deployed();
         WonderTurtleAddress = WonderTurtle.address;
         console.log("WonderTurtle", WonderTurtleAddress);
@@ -52,16 +54,20 @@ describe("WonderTurtle", () => {
 
     describe("contract function", () => {
         it("should be ok to get tokenURI", async () => {
-            const owner = await WonderTurtle.ownerOf(1);
-            expect(owner).to.equal(aliceAddr);
+            let ts = await WonderTurtle.totalSupply();
+            expect(ts).equal(50);
 
-            const tokenURI = await WonderTurtle.tokenURI(1);
+            let tokenId = await WonderTurtle.tokenByIndex(0);
+            const owner = await WonderTurtle.ownerOf(tokenId);
+            expect(owner).to.equal(kevinAddr);
+
+            const tokenURI = await WonderTurtle.tokenURI(tokenId);
             console.log("tokenURI", tokenURI);
         });
 
         it("mint fail and success", async () => {
             await expect(WonderTurtle.mint(951, [])).to.be.revertedWith(
-                "Exceeds max supply"
+                "Minting more tokens than available"
             );
 
             await expect(WonderTurtle.mint(1, [])).to.be.revertedWith(
@@ -84,9 +90,6 @@ describe("WonderTurtle", () => {
 
             ts = await WonderTurtle.totalSupply();
             expect(ts).equal(51);
-
-            const tokenURI = await WonderTurtle.tokenURI(ts);
-            expect(tokenURI).equal('http://localhost:3000/51.token.json');
 
             await expect(WonderTurtle.mint(1, devProof)).to.be.revertedWith(
                 "Minter is not in the whitelist"
@@ -143,7 +146,7 @@ describe("WonderTurtle", () => {
             expect(updateStageTx).to.be.ok;
 
             await expect(WonderTurtle.mint(951, [])).to.be.revertedWith(
-                "Exceeds max supply"
+                "Minting more tokens than available"
             );
 
             await expect(WonderTurtle.mint(1, [])).to.be.revertedWith(

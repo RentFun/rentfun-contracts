@@ -39,43 +39,27 @@ const userConfig: HardhatUserConfig = {
         compilers: [
             {version: "0.7.6"},
             {version: "0.8.4"}
-        ]
+        ],
+        settings: {
+            optimizer: {
+                enabled: true,
+                runs: 1000,
+            }
+        }
     },
     networks: {
         hardhat: {
             allowUnlimitedContractSize: true,
-            blockGasLimit: 100000000,
-            gas: 100000000
         },
         mainnet: {
             ...sharedNetworkConfig,
             url: `https://mainnet.infura.io/v3/${INFURA_KEY}`,
         },
-        xdai: {
-            ...sharedNetworkConfig,
-            url: "https://xdai.poanetwork.dev",
-        },
-        ewc: {
-            ...sharedNetworkConfig,
-            url: `https://rpc.energyweb.org`,
-        },
-        rinkeby: {
-            ...sharedNetworkConfig,
-            url: `https://rinkeby.infura.io/v3/${INFURA_KEY}`,
-        },
-        goerli: {
-            ...sharedNetworkConfig,
-            url: `https://goerli.infura.io/v3/${INFURA_KEY}`,
-        },
         ArbitrumGoerli: {
             allowUnlimitedContractSize: true,
             url: API_URL,
             accounts: [`0x${PRIVATE_KEY}`],
-        },
-        volta: {
-            ...sharedNetworkConfig,
-            url: `https://volta-rpc.energyweb.org`,
-        },
+        }
     },
     namedAccounts: {
         deployer: 0,
