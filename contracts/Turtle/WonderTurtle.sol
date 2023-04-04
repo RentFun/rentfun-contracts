@@ -6,7 +6,6 @@ import '@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol';
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
 contract WonderTurtle is ERC721Enumerable, ReentrancyGuard, Ownable {
@@ -16,7 +15,7 @@ contract WonderTurtle is ERC721Enumerable, ReentrancyGuard, Ownable {
     /** MINTING **/
     uint256 public constant MAX_SUPPLY = 1000;
     string public constant baseExtension = ".json";
-    uint256 private _availableTokenNum;
+    uint256 public availableTokenNum;
     string private _baseTokenURI;
     mapping(uint => uint) private _availableTokens;
     bool public revealed = false;
@@ -31,16 +30,20 @@ contract WonderTurtle is ERC721Enumerable, ReentrancyGuard, Ownable {
     uint256 public mintLimit = 1;
 
     /// @notice A mapping pointing minter address to its minted number.
+    /// @dev stage => minter => count
     mapping(uint8 => mapping(address => uint256)) public mintCounts;
+
+    /** EVENTS **/
+    event stageUpdated(uint8 stage, bytes32 merkleRoot, uint256 mintPrice, uint256 mintLimit);
 
     constructor(string memory baseTokenURI, bytes32 merkleRoot_, address contractOwner)
     ERC721("RentFun - WonderTurtle NFT", "WONDERTURTLE") {
-        _availableTokenNum = MAX_SUPPLY;
+        availableTokenNum = MAX_SUPPLY;
         _baseTokenURI = baseTokenURI;
         merkleRoot = merkleRoot_;
         for (uint256 i = 0; i < 50; i++) {
-            uint256 tokenId = getRandomTokenId(_availableTokenNum);
-            --_availableTokenNum;
+            uint256 tokenId = getRandomTokenId(availableTokenNum);
+            --availableTokenNum;
             _safeMint(treasure, tokenId);
         }
         _transferOwnership(contractOwner);
@@ -48,7 +51,7 @@ contract WonderTurtle is ERC721Enumerable, ReentrancyGuard, Ownable {
 
     function mint(uint256 numToMint, bytes32[] calldata merkleProof) public payable nonReentrant {
         require(numToMint > 0, "Need to mint at least one token");
-        require(_availableTokenNum >= numToMint, "Minting more tokens than available");
+        require(availableTokenNum >= numToMint, "Minting more tokens than available");
         require(_verifyAddress(merkleProof), "Minter is not in the whitelist");
         uint256 mintedCount = mintCounts[stage][msg.sender] + numToMint;
         require(mintedCount <= mintLimit, "Exceeds mint limit");
@@ -59,8 +62,8 @@ contract WonderTurtle is ERC721Enumerable, ReentrancyGuard, Ownable {
         }
 
         for (uint256 i = 0; i < numToMint; i++) {
-            uint256 tokenId = getRandomTokenId(_availableTokenNum);
-            --_availableTokenNum;
+            uint256 tokenId = getRandomTokenId(availableTokenNum);
+            --availableTokenNum;
             _safeMint(msg.sender, tokenId);
         }
         mintCounts[stage][msg.sender] = mintedCount;
@@ -80,6 +83,7 @@ contract WonderTurtle is ERC721Enumerable, ReentrancyGuard, Ownable {
         merkleRoot = merkleRootHash;
         mintPrice = price;
         mintLimit = limit;
+        emit stageUpdated(stage, merkleRoot, mintPrice, mintLimit);
     }
 
     function getRandomTokenId(uint availableNum) public returns (uint256) {

@@ -56,7 +56,6 @@ const userConfig: HardhatUserConfig = {
             url: `https://mainnet.infura.io/v3/${INFURA_KEY}`,
         },
         ArbitrumGoerli: {
-            allowUnlimitedContractSize: true,
             url: API_URL,
             accounts: [`0x${PRIVATE_KEY}`],
         }
