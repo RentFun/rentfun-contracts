@@ -50,9 +50,8 @@ describe("RentFun", () => {
         expect(carolRent).to.equal(parseEther("10"));
 
         const RentFunFactory = await ethers.getContractFactory("RentFun");
-        RentFun = await RentFunFactory.deploy();
+        RentFun = await RentFunFactory.deploy(aliceAddr, aliceAddr, Hour, 1000);
         await RentFun.deployed();
-        await expect(RentFun.initialize(aliceAddr, aliceAddr, Hour, 1000)).to.be.ok;
 
         RentFunAddress = RentFun.address;
         console.log("RentFun", RentFunAddress);

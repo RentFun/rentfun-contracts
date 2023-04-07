@@ -22,8 +22,7 @@ contract RentFun is Ownable, IRentFun {
     uint256 public unitTime;
     uint256 public commission;
     uint256 public constant feeBase = 10000;
-    address public treasure;
-    bool private initialized;
+    address public beneficiary;
 
     EnumerableSet.AddressSet internal owners;
     /// @notice A mapping pointing owner address to its asset contract.
@@ -85,14 +84,12 @@ contract RentFun is Ownable, IRentFun {
     /// @notice Emitted on each token lent cancel
     event LentCanceled(address indexed depositor, address indexed contract_, uint256 tokenId);
 
-    function initialize(address contractOwner, address treasure_, uint256 unitTime_, uint256 commission_) external {
-        require(!initialized, "Already initialized");
-        treasure = treasure_;
+    constructor(address contractOwner, address beneficiary_, uint256 unitTime_, uint256 commission_) {
+        beneficiary = beneficiary_;
         unitTime = unitTime_;
         commission = commission_;
         paymentContracts.add(address(0));
         _transferOwnership(contractOwner);
-        initialized = true;
     }
 
     /// @notice create a vault owned by msg.sender
@@ -147,7 +144,7 @@ contract RentFun is Ownable, IRentFun {
         platformFee = platformFee.sub(partnerFee);
         _pay(detail.payment, msg.sender, detail.depositor, rentFee);
         _pay(detail.payment, msg.sender, partners[contract_].feeReceiver, partnerFee);
-        _pay(detail.payment, msg.sender, treasure, platformFee);
+        _pay(detail.payment, msg.sender, beneficiary, platformFee);
 
         // update detail
         detail.lastRentIdx = ++totalRentCount;
@@ -226,9 +223,9 @@ contract RentFun is Ownable, IRentFun {
         commission = commission_;
     }
 
-    /// @notice treasure setter
-    function setTreasure(address treasure_) external onlyOwner {
-        treasure = treasure_;
+    /// @notice beneficiary setter
+    function setTreasure(address beneficiary_) external onlyOwner {
+        beneficiary = beneficiary_;
     }
 
     /// @notice add payment

@@ -9,7 +9,7 @@ import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-contract WonderTurtle is ERC721Enumerable, ReentrancyGuard, Ownable {
+contract WonderBird is ERC721Enumerable, ReentrancyGuard, Ownable {
     using SafeMath for uint256;
     using Strings for uint256;
     using EnumerableSet for EnumerableSet.UintSet;
@@ -40,7 +40,7 @@ contract WonderTurtle is ERC721Enumerable, ReentrancyGuard, Ownable {
     event stageUpdated(uint8 stage, bytes32 merkleRoot, uint256 mintPrice, uint256 mintLimit);
 
     constructor(string memory baseTokenURI, bytes32 merkleRoot_, address contractOwner)
-    ERC721("RentFun - WonderTurtle NFT", "WONDERTURTLE") {
+    ERC721("RentFun - WonderBird NFT", "WONDERBIRD") {
         availableTokenNum = MAX_SUPPLY;
         _baseTokenURI = baseTokenURI;
         merkleRoot = merkleRoot_;
