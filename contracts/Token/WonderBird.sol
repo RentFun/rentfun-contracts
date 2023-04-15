@@ -7,21 +7,22 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 contract WonderBird is ERC721Enumerable, ReentrancyGuard, Ownable {
     using SafeMath for uint256;
     using Strings for uint256;
-    using EnumerableSet for EnumerableSet.UintSet;
 
     /** MINTING **/
     uint256 public constant MAX_SUPPLY = 1000;
-    string public constant baseExtension = ".json";
     uint256 public availableTokenNum;
     string private _baseTokenURI;
     mapping(uint256 => uint256) private _availableTokens;
-    EnumerableSet.UintSet private upgradedTokens;
+
+    /** tokenURI **/
+    string public constant baseExtension = ".json";
     bool public revealed = false;
+    string[] public neckTraits;
+    mapping(uint256 => uint8) public neckTraitIdxes;
 
     /// treasure address
     address public constant treasure = 0x3353b44be83197747eB6a4b3B9d2e391c2A357d5;
@@ -31,7 +32,6 @@ contract WonderBird is ERC721Enumerable, ReentrancyGuard, Ownable {
     bytes32 public merkleRoot;
     uint256 public mintPrice = 0;
     uint256 public mintLimit = 1;
-
     /// @notice A mapping pointing minter address to its minted number.
     /// @dev stage => minter => count
     mapping(uint8 => mapping(address => uint256)) public mintCounts;
@@ -41,6 +41,7 @@ contract WonderBird is ERC721Enumerable, ReentrancyGuard, Ownable {
 
     constructor(string memory baseTokenURI, bytes32 merkleRoot_, address contractOwner)
     ERC721("RentFun - WonderBird NFT", "WONDERBIRD") {
+        neckTraits = ['Arbitrum', 'Diamond', 'TreasureDAO', 'Ethereum', 'Nova'];
         availableTokenNum = MAX_SUPPLY;
         _baseTokenURI = baseTokenURI;
         merkleRoot = merkleRoot_;
@@ -81,8 +82,8 @@ contract WonderBird is ERC721Enumerable, ReentrancyGuard, Ownable {
     }
 
     /// @notice update stage, merkleRoot, mintPrice and mintLimit
-    function UpdateStage(uint8 stage_, bytes32 merkleRootHash, uint256 price, uint256 limit) external onlyOwner {
-        stage = stage_;
+    function UpdateStage(bytes32 merkleRootHash, uint256 price, uint256 limit) external onlyOwner {
+        stage++;
         merkleRoot = merkleRootHash;
         mintPrice = price;
         mintLimit = limit;
@@ -90,10 +91,13 @@ contract WonderBird is ERC721Enumerable, ReentrancyGuard, Ownable {
     }
 
     /// @notice upgrade tokens
-    function upgrade(uint256[] memory tokenIds) external onlyOwner {
+    function upgrade(uint256[] memory tokenIds, uint8[] memory neckIndexes) external onlyOwner {
+        require(tokenIds.length == neckIndexes.length, 'Length mismatch');
+
         for (uint256 i = 0; i < tokenIds.length; i++) {
-            _requireMinted(tokenId);
-            upgradedTokens.add(tokenIds[i]);
+            _requireMinted(tokenIds[i]);
+            require(neckIndexes[i] > 0 && neckIndexes[i] < neckTraits.length+1, 'Wrong neck trait value');
+            neckTraitIdxes[tokenIds[i]] = neckIndexes[i];
         }
     }
 
@@ -139,10 +143,13 @@ contract WonderBird is ERC721Enumerable, ReentrancyGuard, Ownable {
 
     function tokenURI(uint256 tokenId) public view override returns (string memory) {
         _requireMinted(tokenId);
-        string memory tokenStr =
-            revealed ? (upgradedTokens.contains(tokenId) ?
-            'upgraded_' + tokenId.toString() : tokenId.toString()) : 'unrevealed';
-        return string(abi.encodePacked(_baseTokenURI, tokenStr, baseExtension));
+        if (!revealed) {
+            return string(abi.encodePacked(_baseTokenURI, 'unrevealed', baseExtension));
+        } else if (neckTraitIdxes[tokenId] != 0) {
+            return string(abi.encodePacked(_baseTokenURI, tokenId.toString(), '_', neckTraits[neckTraitIdxes[tokenId]-1], baseExtension));
+        } else {
+            return string(abi.encodePacked(_baseTokenURI, tokenId.toString(), baseExtension));
+        }
     }
 
     function _baseURI() internal view virtual override returns (string memory) {
