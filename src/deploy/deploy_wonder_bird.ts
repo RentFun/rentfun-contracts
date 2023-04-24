@@ -1,26 +1,38 @@
 import { DeployFunction } from "hardhat-deploy/types";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
-import { ethers } from "hardhat";
+import {MerkleTree} from "merkletreejs";
+import { utils } from "ethers";
 
-// const owners = ["0xBd39f5936969828eD9315220659cD11129071814", "0xBca9567A9e8D5F6F58C419d32aF6190F74C880e6"]
-// const threshold = 2
-// const AddressZero = "0x0000000000000000000000000000000000000000"
-// const data = "0x"
+const whitelist = [
+    '0xa7DeBb68F2684074Ec4354B68E36C34AF363Fd57',
+    '0x38dF87028C451AD521B2FB1576732e9637A66e6f',
+    '0xD2884241140347F16F21EAD8a766982363630670',
+    '0x5dF922C896e9457A5CA59a568265dD8025B4D369',
+    '0x3353b44be83197747eB6a4b3B9d2e391c2A357d5',
+    '0x33a280189d3029a632d9f669775De2cDE666B590',
+];
 
-const deploy_address_store: DeployFunction = async function (
+const { keccak256 } = utils;
+let leaves = whitelist.map((addr) => keccak256(addr));
+let merkleTree = new MerkleTree(leaves, keccak256, { sortPairs: true });
+
+const deploy_wonder_bird: DeployFunction = async function (
     hre: HardhatRuntimeEnvironment,
 ) {
     const { deployments, getNamedAccounts } = hre;
     const { deployer } = await getNamedAccounts();
     const { deploy } = deployments;
 
+    const merkleRootHash = merkleTree.getHexRoot();
+    console.log('merkleRootHash', merkleRootHash);
+
     await deploy("WonderBird", {
         from: deployer,
-        args: ['ipfs://', ethers.utils.formatBytes32String(""), '0x3353b44be83197747eB6a4b3B9d2e391c2A357d5'],
+        args: ['ipfs://', merkleRootHash, '0x3353b44be83197747eB6a4b3B9d2e391c2A357d5'],
         log: true,
         deterministicDeployment: true,
     });
 };
 
-deploy_address_store.tags = ['WonderBird']
-export default deploy_address_store;
+deploy_wonder_bird.tags = ['WonderBird']
+export default deploy_wonder_bird;

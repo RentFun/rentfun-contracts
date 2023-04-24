@@ -82,8 +82,8 @@ contract WonderBird is ERC721Enumerable, ReentrancyGuard, Ownable {
     }
 
     /// @notice update stage, merkleRoot, mintPrice and mintLimit
-    function UpdateStage(bytes32 merkleRootHash, uint256 price, uint256 limit) external onlyOwner {
-        stage++;
+    function updateStage(uint8 stage_, bytes32 merkleRootHash, uint256 price, uint256 limit) external onlyOwner {
+        stage = stage_;
         merkleRoot = merkleRootHash;
         mintPrice = price;
         mintLimit = limit;
@@ -101,7 +101,7 @@ contract WonderBird is ERC721Enumerable, ReentrancyGuard, Ownable {
         }
     }
 
-    function getRandomTokenId(uint availableNum) public returns (uint256) {
+    function getRandomTokenId(uint availableNum) internal returns (uint256) {
         uint256 randomNum = uint256(keccak256(abi.encodePacked(
                 tx.gasprice, block.number, block.timestamp, block.difficulty, blockhash(block.number - 1),
                 address(this), availableNum)));

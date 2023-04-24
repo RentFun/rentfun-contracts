@@ -132,9 +132,9 @@ describe("WonderBird", () => {
             );
         });
 
-        //function UpdateStage(uint8 stage_, bytes32 merkleRootHash, uint256 price, uint256 limit) {
+        //function updateStage(uint8 stage_, bytes32 merkleRootHash, uint256 price, uint256 limit) {
 
-        it("mint fail and success after UpdateStage 2", async () => {
+        it("mint fail and success after updateStage 2", async () => {
             const whitelist = [bobAddr, carolAddr, devAddr];
             let leaves = whitelist.map((addr) => keccak256(addr));
             merkleTree = new MerkleTree(leaves, keccak256, { sortPairs: true });
@@ -143,7 +143,7 @@ describe("WonderBird", () => {
             aliceProof = merkleTree.getHexProof(keccak256(aliceAddr));
             bobProof = merkleTree.getHexProof(keccak256(bobAddr));
 
-            const updateStageTx = await WonderBird.UpdateStage(merkleRootHash, parseEther("0.04"), 2);
+            const updateStageTx = await WonderBird.updateStage(2, merkleRootHash, parseEther("0.04"), 2);
             expect(updateStageTx).to.be.ok;
 
             await expect(WonderBird.mint(1, aliceProof)).to.be.revertedWith(
@@ -165,11 +165,11 @@ describe("WonderBird", () => {
             );
         });
 
-        it("mint fail and success after UpdateStage 3", async () => {
+        it("mint fail and success after updateStage 3", async () => {
             let stage = await WonderBird.stage();
             console.log("stage", stage);
 
-            const updateStageTx = await WonderBird.UpdateStage(ethers.utils.formatBytes32String(""), parseEther("0.06"), 3);
+            const updateStageTx = await WonderBird.updateStage(3, ethers.utils.formatBytes32String(""), parseEther("0.06"), 3);
             expect(updateStageTx).to.be.ok;
 
             await expect(WonderBird.mint(951, [])).to.be.revertedWith(

@@ -58,6 +58,8 @@ const userConfig: HardhatUserConfig = {
         ArbitrumGoerli: {
             url: API_URL,
             accounts: [`0x${PRIVATE_KEY}`],
+            gasPrice: 700000000,
+            gas: 400000000,
         }
     },
     namedAccounts: {
