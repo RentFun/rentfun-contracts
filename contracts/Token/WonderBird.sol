@@ -2,7 +2,7 @@
 
 pragma solidity ^0.8.4;
 
-import '@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol';
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
@@ -25,7 +25,7 @@ contract WonderBird is ERC721Enumerable, ReentrancyGuard, Ownable {
     mapping(uint256 => uint8) public neckTraitIdxes;
 
     /// treasure address
-    address public constant treasure = 0x3353b44be83197747eB6a4b3B9d2e391c2A357d5;
+    address public constant treasure = 0x4d3a8F683F2D27Cc38E638BF5398d4a9Bd548B85;
 
     /** StageInfo **/
     uint8 public stage = 1;
@@ -39,7 +39,7 @@ contract WonderBird is ERC721Enumerable, ReentrancyGuard, Ownable {
     /** EVENTS **/
     event stageUpdated(uint8 stage, bytes32 merkleRoot, uint256 mintPrice, uint256 mintLimit);
 
-    constructor(string memory baseTokenURI, bytes32 merkleRoot_, address contractOwner)
+    constructor(string memory baseTokenURI, bytes32 merkleRoot_)
     ERC721("RentFun - WonderBird NFT", "WONDERBIRD") {
         neckTraits = ['Arbitrum', 'Diamond', 'TreasureDAO', 'Ethereum', 'Nova'];
         availableTokenNum = MAX_SUPPLY;
@@ -50,7 +50,6 @@ contract WonderBird is ERC721Enumerable, ReentrancyGuard, Ownable {
             --availableTokenNum;
             _safeMint(treasure, tokenId);
         }
-        _transferOwnership(contractOwner);
     }
 
     function mint(uint256 numToMint, bytes32[] calldata merkleProof) public payable nonReentrant {
